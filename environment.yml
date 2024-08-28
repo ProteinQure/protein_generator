@@ -19,3 +19,4 @@ dependencies:
   - pytorch-cuda
   - seaborn=0.12.2
   - ray-default=2.33.0
+  - fastapi[standard]=0.112.2
