@@ -3,7 +3,7 @@ import json
 import os
 import uuid
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, status
 from pydantic import BaseModel
 
 from utils.sampler import SEQDIFF_sampler, cleavage_foldswitch_SAMPLER
@@ -15,8 +15,12 @@ sampler_map = {
     "cleavage_foldswitch": cleavage_foldswitch_SAMPLER,
 }
 
+app = FastAPI()
+
 
 class DesignConfig(BaseModel):
+    """ """
+
     F: int = 1
     T: int = 25
     aa_composition: str = "W0.2"
@@ -88,23 +92,47 @@ class DesignConfig(BaseModel):
     sampler: str = "default"
 
 
-app = FastAPI()
+class HealthCheck(BaseModel):
+    """Response model to validate and return when performing a health check."""
+
+    status: str = "OK"
 
 
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
+class JobStatus(BaseModel):
+    """ """
+
+    job_id: str
+    status: str
 
 
-@app.post("/workflow")
+@app.get(
+    "/health",
+    tags=["healthcheck"],
+    summary="Perform a Health Check",
+    response_description="Return HTTP Status Code 200 (OK)",
+    status_code=status.HTTP_200_OK,
+    response_model=HealthCheck,
+)
+def get_health() -> HealthCheck:
+    """
+    ## Perform a Health Check
+    Endpoint to perform a healthcheck on. This endpoint can primarily be used Docker
+    to ensure a robust container orchestration and management is in place. Other
+    services which rely on proper functioning of the API service will not deploy if this
+    endpoint returns any other HTTP status code except 200 (OK).
+    Returns:
+        HealthCheck: Returns a JSON response with the health status
+    """
+    return HealthCheck(status="OK")
+
+
+@app.post("/inference", response_model=JobStatus)
 async def run_workflow(config: DesignConfig, background_tasks: BackgroundTasks):
-    # config = DesignConfig()
     job_id = str(uuid.uuid4())
     JOB_STATUS[job_id] = "pending"
     background_tasks.add_task(_run_workflow, job_id, config)
-    _run_workflow(job_id, config)
 
-    return {"job_id", job_id}
+    return JobStatus(job_id=job_id, status=JOB_STATUS.get(job_id, "not found"))
 
 
 def _run_workflow(job_id: str, config: DesignConfig):
@@ -161,7 +189,7 @@ def _run_workflow(job_id: str, config: DesignConfig):
     JOB_STATUS[job_id] = "completed"
 
 
-@app.get("/job-status/{job_id}")
+@app.get("/job-status/{job_id}", response_model=JobStatus)
 async def get_job_status(job_id: str):
     status = JOB_STATUS.get(job_id, "not found")
-    return {"job_id": job_id, "status": status}
+    return JobStatus(job_id=job_id, status=status)
