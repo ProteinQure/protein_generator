@@ -126,8 +126,14 @@ def get_health() -> HealthCheck:
     return HealthCheck(status="OK")
 
 
-@app.post("/inference", response_model=JobStatus)
-async def run_workflow(config: DesignConfig, background_tasks: BackgroundTasks):
+@app.post(
+    "/inference",
+    response_description="The ID and status of the created job",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=JobStatus,
+)
+def run_workflow(config: DesignConfig, background_tasks: BackgroundTasks):
+    """ """
     job_id = str(uuid.uuid4())
     JOB_STATUS[job_id] = "pending"
     background_tasks.add_task(_run_workflow, job_id, config)
@@ -136,57 +142,60 @@ async def run_workflow(config: DesignConfig, background_tasks: BackgroundTasks):
 
 
 def _run_workflow(job_id: str, config: DesignConfig):
-    JOB_STATUS[job_id] = "running"
-    model_args = config.model_dump()
-    chosen_sampler = sampler_map[config.sampler]
-    S = chosen_sampler(model_args)
+    try:
+        JOB_STATUS[job_id] = "running"
+        model_args = config.model_dump()
+        chosen_sampler = sampler_map[config.sampler]
+        S = chosen_sampler(model_args)
 
-    # get JSON args
-    if config.input_json is not None:
-        with open(config.input_json) as f_json:
-            argdicts = json.load(f_json)
-        print(f"JSON args loaded {config.input_json}")
-        # wrap argdicts in a list if not inputed as one
-        if isinstance(argdicts, dict):
-            argdicts = [argdicts]
-        S.set_args(argdicts[0])
-    else:
-        # no json input, spoof list of argument dicts
-        argdicts = [{}]
-
-    # build model
-    S.model_init()
-
-    # diffuser init
-    S.diffuser_init()
-
-    for i_argdict, argdict in enumerate(argdicts):
-
+        # get JSON args
         if config.input_json is not None:
-            print(
-                f"\nAdding argument dict {i_argdict} from input JSON ({len(argdicts)} total):"
-            )
+            with open(config.input_json) as f_json:
+                argdicts = json.load(f_json)
+            print(f"JSON args loaded {config.input_json}")
+            # wrap argdicts in a list if not inputed as one
+            if isinstance(argdicts, dict):
+                argdicts = [argdicts]
+            S.set_args(argdicts[0])
+        else:
+            # no json input, spoof list of argument dicts
+            argdicts = [{}]
 
-            ### HERE IS WHERE ARGUMENTS SHOULD GET SET
-            S.set_args(argdict)
-            S.diffuser_init()
+        # build model
+        S.model_init()
 
-        for i_des in range(
-            S.args["start_num"], S.args["start_num"] + S.args["num_designs"]
-        ):
+        # diffuser init
+        S.diffuser_init()
 
-            out_prefix = f"{config.out}_{i_des:06}"
+        for i_argdict, argdict in enumerate(argdicts):
 
-            if config.cautious and os.path.exists(out_prefix + ".pdb"):
+            if config.input_json is not None:
                 print(
-                    f"CAUTIOUS MODE: Skipping design because output file "
-                    f'{out_prefix + ".pdb"} already exists.'
+                    f"\nAdding argument dict {i_argdict} from input JSON ({len(argdicts)} total):"
                 )
-                continue
 
-            S.generate_sample()
+                ### HERE IS WHERE ARGUMENTS SHOULD GET SET
+                S.set_args(argdict)
+                S.diffuser_init()
 
-    JOB_STATUS[job_id] = "completed"
+            for i_des in range(
+                S.args["start_num"], S.args["start_num"] + S.args["num_designs"]
+            ):
+
+                out_prefix = f"{config.out}_{i_des:06}"
+
+                if config.cautious and os.path.exists(out_prefix + ".pdb"):
+                    print(
+                        f"CAUTIOUS MODE: Skipping design because output file "
+                        f'{out_prefix + ".pdb"} already exists.'
+                    )
+                    continue
+
+                S.generate_sample()
+
+        JOB_STATUS[job_id] = "completed"
+    except Exception:
+        JOB_STATUS[job_id] = "failed"
 
 
 @app.get(
