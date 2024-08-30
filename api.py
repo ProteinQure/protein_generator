@@ -3,7 +3,7 @@ import json
 import os
 import uuid
 
-from fastapi import FastAPI, BackgroundTasks, status
+from fastapi import FastAPI, BackgroundTasks, status, HTTPException
 from pydantic import BaseModel
 
 from utils.sampler import SEQDIFF_sampler, cleavage_foldswitch_SAMPLER
@@ -189,7 +189,18 @@ def _run_workflow(job_id: str, config: DesignConfig):
     JOB_STATUS[job_id] = "completed"
 
 
-@app.get("/job-status/{job_id}", response_model=JobStatus)
-async def get_job_status(job_id: str):
-    status = JOB_STATUS.get(job_id, "not found")
+@app.get(
+    "/job-status/{job_id}",
+    response_description="The ID and status of the requested job",
+    response_model=JobStatus,
+)
+def get_job_status(job_id: str):
+    """
+    Returns the current status of the job represented by `job_id`.
+
+    If `job_id` does not exist, return a status code 404
+    """
+    if job_id not in JOB_STATUS:
+        raise HTTPException(status_code=404, detail="Job not found")
+    status = JOB_STATUS[job_id]
     return JobStatus(job_id=job_id, status=status)
